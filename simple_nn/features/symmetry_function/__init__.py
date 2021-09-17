@@ -1,12 +1,14 @@
 from __future__ import print_function
 from __future__ import division
 import os, sys
+from numpy.core.numeric import indices
 import tensorflow as tf
 import numpy as np
 import six
 from six.moves import cPickle as pickle
 from ase import io
 from ase import units
+import json
 import ase
 from ._libsymf import lib, ffi
 from ...utils import _gen_2Darray_for_ffi, compress_outcar, _generate_scale_file, \
@@ -137,92 +139,102 @@ class Symmetry_function(object):
 
     def _parse_data(self, serialized, inp_size, use_force=False, use_stress=False, atomic_weights=False):
         features = {
-            'E': tf.FixedLenFeature([], dtype=tf.string),
-            'tot_num': tf.FixedLenFeature([], dtype=tf.string),
-            'partition': tf.FixedLenFeature([], dtype=tf.string),
-            'struct_type': tf.FixedLenSequenceFeature([], dtype=tf.string, allow_missing=True),
-            'struct_weight': tf.FixedLenFeature([], dtype=tf.string, default_value=np.array([1.0]).tobytes()),
-            'pickle_name': tf.FixedLenSequenceFeature([], dtype=tf.string, allow_missing=True),
-            'atom_idx': tf.FixedLenFeature([], dtype=tf.string)
+            'E': tf.io.FixedLenFeature([], dtype=tf.string),
+            'tot_num': tf.io.FixedLenFeature([], dtype=tf.string),
+            'partition': tf.io.FixedLenFeature([], dtype=tf.string),
+            'struct_type': tf.io.FixedLenSequenceFeature([], dtype=tf.string, allow_missing=True),
+            'struct_weight': tf.io.FixedLenFeature([], dtype=tf.string, default_value=np.array([1.0]).tobytes()),
+            'pickle_name': tf.io.FixedLenSequenceFeature([], dtype=tf.string, allow_missing=True),
+            'atom_idx': tf.io.FixedLenFeature([], dtype=tf.string)
         }
  
         for item in self.parent.inputs['atom_types']:
-            features['x_'+item] = tf.FixedLenFeature([], dtype=tf.string)
-            features['N_'+item] = tf.FixedLenFeature([], dtype=tf.string)
-            features['params_'+item] = tf.FixedLenFeature([], dtype=tf.string)
+            features['x_'+item] = tf.io.FixedLenFeature([], dtype=tf.string)
+            features['N_'+item] = tf.io.FixedLenFeature([], dtype=tf.string)
+            features['params_'+item] = tf.io.FixedLenFeature([], dtype=tf.string)
             if use_force:
-                features['dx_indices_'+item] = tf.FixedLenFeature([], dtype=tf.string)
-                features['dx_values_'+item] = tf.FixedLenFeature([], dtype=tf.string)
-                features['dx_dense_shape_'+item] = tf.FixedLenFeature([], dtype=tf.string)
+                features['dx_indices_'+item] = tf.io.FixedLenFeature([], dtype=tf.string)
+                features['dx_values_'+item] = tf.io.FixedLenFeature([], dtype=tf.string)
+                features['dx_dense_shape_'+item] = tf.io.FixedLenFeature([], dtype=tf.string)
             if use_stress:
-                features['da_'+item] = tf.FixedLenFeature([], dtype=tf.string)
-            features['partition_'+item] = tf.FixedLenFeature([], dtype=tf.string)
+                features['da_'+item] = tf.io.FixedLenFeature([], dtype=tf.string)
+            features['partition_'+item] = tf.io.FixedLenFeature([], dtype=tf.string)
             if atomic_weights:
-                features['atomic_weights_'+item] = tf.FixedLenFeature([], dtype=tf.string)
+                features['atomic_weights_'+item] = tf.io.FixedLenFeature([], dtype=tf.string)
 
             if self.inputs['add_NNP_ref']:
-                features['NNP_E_'+item] = tf.FixedLenFeature([], dtype=tf.string)
+                features['NNP_E_'+item] = tf.io.FixedLenFeature([], dtype=tf.string)
 
         if use_force:
-            features['F'] = tf.FixedLenFeature([], dtype=tf.string)
+            features['F'] = tf.io.FixedLenFeature([], dtype=tf.string)
 
         if use_stress:
-            features['S'] = tf.FixedLenFeature([], dtype=tf.string)
+            features['S'] = tf.io.FixedLenFeature([], dtype=tf.string)
 
-        read_data = tf.parse_single_example(serialized=serialized, features=features)
+        read_data = tf.io.parse_single_example(serialized=serialized, features=features)
         #read_data = tf.parse_example(serialized=serialized, features=features)
  
         res = dict()
  
-        res['E'] = tf.decode_raw(read_data['E'], tf.float64)
-        res['tot_num'] = tf.decode_raw(read_data['tot_num'], tf.float64)
-        res['partition'] = tf.decode_raw(read_data['partition'], tf.int32)
+        res['E'] = tf.io.decode_raw(read_data['E'], tf.float64)
+        res['tot_num'] = tf.io.decode_raw(read_data['tot_num'], tf.float64)
+        res['partition'] = tf.io.decode_raw(read_data['partition'], tf.int32)
         res['struct_type'] = read_data['struct_type']
-        res['struct_weight'] = tf.decode_raw(read_data['struct_weight'], tf.float64)
+        res['struct_weight'] = tf.io.decode_raw(read_data['struct_weight'], tf.float64)
         res['pickle_name'] = read_data['pickle_name']
         # For backward compatibility...
         res['struct_type'] = tf.cond(tf.equal(tf.shape(res['struct_type'])[0], 0),
                                      lambda: tf.constant(['None']),
                                      lambda: res['struct_type'])
-        res['atom_idx'] = tf.reshape(tf.decode_raw(read_data['atom_idx'], tf.int32), [-1, 1])
-
+        res['atom_idx'] = tf.reshape(tf.io.decode_raw(read_data['atom_idx'], tf.int32), [-1, 1])
+        
         for item in self.parent.inputs['atom_types']:
-            res['N_'+item] = tf.decode_raw(read_data['N_'+item], tf.int64)
+            res['N_'+item] = tf.io.decode_raw(read_data['N_'+item], tf.int64)
 
-            res['x_'+item] = tf.cond(tf.equal(res['N_'+item][0], 0),
+            res['x_'+item] = tf.cond(tf.equal(res['N_'+item][0],     0),
                                      lambda: tf.zeros([0, inp_size[item]], dtype=tf.float64),
-                                     lambda: tf.reshape(tf.decode_raw(read_data['x_'+item], tf.float64), [-1, inp_size[item]]))
+                                     lambda: tf.reshape(tf.io.decode_raw(read_data['x_'+item], tf.float64), [-1, inp_size[item]]))
 
             if self.inputs['add_NNP_ref']:
                 res['NNP_E_'+item] = tf.cond(tf.equal(res['N_'+item][0], 0),
                                          lambda: tf.zeros([0, 1], dtype=tf.float64),
-                                         lambda: tf.reshape(tf.decode_raw(read_data['NNP_E_'+item], tf.float64), [-1, 1]))
+                                         lambda: tf.reshape(tf.io.decode_raw(read_data['NNP_E_'+item], tf.float64), [-1, 1]))
+
+
+                """
+                                            tf.sparse.SparseTensor(
+                                                indices=tf.reshape(tf.io.decode_raw(read_data['dx_indices_'+item], tf.int64),[-1,2]),
+                                                dense_shape=tf.io.decode_raw(read_data['dx_dense_shape_'+item], tf.int64),
+                                                values=tf.io.decode_raw(read_data['dx_values_'+item], tf.float64)), 
+                                                """
 
             if use_force:
+                print(read_data['dx_indices_'+item])
+                print(tf.io.decode_raw(read_data['dx_indices_'+item], tf.int64))
                 res['dx_'+item] = tf.cond(tf.equal(res['N_'+item][0], 0),
                                           lambda: tf.zeros([0, inp_size[item], 0, 3], dtype=tf.float64),
                                           lambda: tf.reshape(
-                                            tf.sparse_to_dense(
-                                                sparse_indices=tf.decode_raw(read_data['dx_indices_'+item], tf.int32),
-                                                output_shape=tf.decode_raw(read_data['dx_dense_shape_'+item], tf.int32),
-                                                sparse_values=tf.decode_raw(read_data['dx_values_'+item], tf.float64)), 
+                                            tf.compat.v1.sparse_to_dense(
+                                                sparse_indices=tf.io.decode_raw(read_data['dx_indices_'+item], tf.int64),
+                                                output_shape=tf.io.decode_raw(read_data['dx_dense_shape_'+item], tf.int64),
+                                                sparse_values=tf.io.decode_raw(read_data['dx_values_'+item], tf.float64)), 
                                             [tf.shape(res['x_'+item])[0], inp_size[item], -1, 3]))
 
             if use_stress:
                 res['da_'+item] = tf.cond(tf.equal(res['N_'+item][0], 0),
                                           lambda: tf.zeros([0, inp_size[item], 3, 6], dtype=tf.float64),
-                                          lambda: tf.reshape(tf.decode_raw(read_data['da_'+item], tf.float64), [-1, inp_size[item], 3, 6]))
+                                          lambda: tf.reshape(tf.io.decode_raw(read_data['da_'+item], tf.float64), [-1, inp_size[item], 3, 6]))
  
-            res['partition_'+item] = tf.decode_raw(read_data['partition_'+item], tf.int32)
+            res['partition_'+item] = tf.io.decode_raw(read_data['partition_'+item], tf.int32)
 
             if atomic_weights:
-                res['atomic_weights_'+item] = tf.decode_raw(read_data['atomic_weights_'+item], tf.float64)
+                res['atomic_weights_'+item] = tf.io.decode_raw(read_data['atomic_weights_'+item], tf.float64)
 
         if use_force: 
-            res['F'] = tf.reshape(tf.decode_raw(read_data['F'], tf.float64), [-1, 3])
+            res['F'] = tf.reshape(tf.io.decode_raw(read_data['F'], tf.float64), [-1, 3])
  
         if use_stress:
-            res['S'] = tf.decode_raw(read_data['S'], tf.float64)
+            res['S'] = tf.io.decode_raw(read_data['S'], tf.float64)
         
         return res
 
@@ -269,7 +281,8 @@ class Symmetry_function(object):
             #dataset = dataset.cache()
             iterator = dataset.make_initializable_iterator()
         else:
-            dataset = dataset.apply(tf.contrib.data.shuffle_and_repeat(200, None))
+            _tmp = tf.data.Dataset.shuffle(buffer_size=200)
+            dataset = dataset.apply(_tmp.repeat(None))
             dataset = dataset.padded_batch(batch_size, batch_dict)
             # prefetch test
             dataset = dataset.prefetch(buffer_size=1)
@@ -430,13 +443,13 @@ class Symmetry_function(object):
                 ptem = tmp_pickle_train_list[item]
                 if i == 0:
                     record_name = './data/training_data_{:0>4}_to_{:0>4}.tfrecord'.format(int(i/self.inputs['data_per_tfrecord']), num_tfrecord_train)
-                    writer = tf.python_io.TFRecordWriter(record_name)
+                    writer = tf.compat.v1.python_io.TFRecordWriter(record_name)
                 elif (i % self.inputs['data_per_tfrecord']) == 0:
                     writer.close()
                     self.parent.logfile.write('{} file saved in {}\n'.format(self.inputs['data_per_tfrecord'], record_name))
                     train_list.write(record_name + '\n')
                     record_name = './data/training_data_{:0>4}_to_{:0>4}.tfrecord'.format(int(i/self.inputs['data_per_tfrecord']), num_tfrecord_train)
-                    writer = tf.python_io.TFRecordWriter(record_name)
+                    writer = tf.compat.v1.python_io.TFRecordWriter(record_name)
  
                 tmp_res = pickle_load(ptem)
                 tmp_res['pickle_name'] = ptem
@@ -474,13 +487,13 @@ class Symmetry_function(object):
                     ptem = tmp_pickle_valid_list[item]
                     if i == 0:
                         record_name = './data/valid_data_{:0>4}_to_{:0>4}.tfrecord'.format(int(i/self.inputs['data_per_tfrecord']), num_tfrecord_valid)
-                        writer = tf.python_io.TFRecordWriter(record_name)
+                        writer = tf.compat.v1.python_io.TFRecordWriter(record_name)
                     elif (i % self.inputs['data_per_tfrecord']) == 0:
                         writer.close()
                         self.parent.logfile.write('{} file saved in {}\n'.format(self.inputs['data_per_tfrecord'], record_name))
                         valid_list.write(record_name + '\n')
                         record_name = './data/valid_data_{:0>4}_to_{:0>4}.tfrecord'.format(int(i/self.inputs['data_per_tfrecord']), num_tfrecord_valid)
-                        writer = tf.python_io.TFRecordWriter(record_name)
+                        writer = tf.compat.v1.python_io.TFRecordWriter(record_name)
  
                     tmp_res = pickle_load(ptem)
                     tmp_res['pickle_name'] = ptem

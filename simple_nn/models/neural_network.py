@@ -18,6 +18,13 @@ from ase import units
 Neural network model with symmetry function as a descriptor
 """
 
+# tf version checker 
+"""
+major_version = int(tf.__version__.split(".")[0])
+if major_version >= 2 :
+    from tensorflow.python import _pywrap_util_port
+    print("MKL enabled")
+    """
 # TODO: add the part for selecting the memory device(CPU or GPU)
 # TODO: BFGS support
 # TODO: add regularization
@@ -90,7 +97,7 @@ class Neural_network(object):
                               }
         self.inputs = dict()
         self.global_step = tf.Variable(0, trainable=False)
-        self.increment_global_step = tf.assign(self.global_step, self.global_step+1)
+        self.increment_global_step = tf.compat.v1.assign(self.global_step, self.global_step+1)
         self.train_data_list = './train_list'
         self.valid_data_list = './valid_list'
         self.test_data_list = './test_list'
